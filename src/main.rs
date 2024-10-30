@@ -29,15 +29,12 @@ use deno_core::RequestedModuleType;
 use deno_core::ResolutionKind;
 use deno_core::RuntimeOptions;
 
-// TODO(bartlomieju): this is duplicated in `testing/checkin`
 type SourceMapStore = Rc<RefCell<HashMap<String, Vec<u8>>>>;
 
-// TODO(bartlomieju): this is duplicated in `testing/checkin`
 struct TypescriptModuleLoader {
     source_maps: SourceMapStore,
 }
 
-// TODO(bartlomieju): this is duplicated in `testing/checkin`
 impl ModuleLoader for TypescriptModuleLoader {
     fn resolve(
         &self,
@@ -45,7 +42,6 @@ impl ModuleLoader for TypescriptModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, Error> {
-        println!("👀 resolve: {} -> {}", specifier, referrer);
         Ok(resolve_import(specifier, referrer)?)
     }
 
@@ -63,28 +59,51 @@ impl ModuleLoader for TypescriptModuleLoader {
         ) -> Result<ModuleSource, AnyError> {
             println!("👀 load: {}", module_specifier);
 
-            let path = module_specifier
-                .to_file_path()
-                .map_err(|_| anyhow!("Only file:// URLs are supported. xx"))?;
+            let (code, should_transpile, media_type, module_type) =
+                if module_specifier.scheme() == "file" {
+                    let path = module_specifier.to_file_path().map_err(|_| {
+                        anyhow!("There was an error converting the module specifier to a file path")
+                    })?;
 
-            let media_type = MediaType::from_path(&path);
-            let (module_type, should_transpile) = match MediaType::from_path(&path) {
-                MediaType::JavaScript | MediaType::Mjs | MediaType::Cjs => {
-                    (ModuleType::JavaScript, false)
-                }
-                MediaType::Jsx => (ModuleType::JavaScript, true),
-                MediaType::TypeScript
-                | MediaType::Mts
-                | MediaType::Cts
-                | MediaType::Dts
-                | MediaType::Dmts
-                | MediaType::Dcts
-                | MediaType::Tsx => (ModuleType::JavaScript, true),
-                MediaType::Json => (ModuleType::Json, false),
-                _ => bail!("Unknown extension {:?}", path.extension()),
-            };
+                    let media_type = MediaType::from_path(&path);
+                    let (module_type, should_transpile) = match MediaType::from_path(&path) {
+                        MediaType::JavaScript | MediaType::Mjs | MediaType::Cjs => {
+                            (ModuleType::JavaScript, false)
+                        }
+                        MediaType::Jsx => (ModuleType::JavaScript, true),
+                        MediaType::TypeScript
+                        | MediaType::Mts
+                        | MediaType::Cts
+                        | MediaType::Dts
+                        | MediaType::Dmts
+                        | MediaType::Dcts
+                        | MediaType::Tsx => (ModuleType::JavaScript, true),
+                        MediaType::Json => (ModuleType::Json, false),
+                        _ => bail!("Unknown extension {:?}", path.extension()),
+                    };
 
-            let code = std::fs::read_to_string(&path)?;
+                    (
+                        std::fs::read_to_string(&path)?,
+                        should_transpile,
+                        media_type,
+                        module_type,
+                    )
+                } else if module_specifier.scheme() == "https" {
+                    let url = module_specifier.to_string();
+
+                    let response = ureq::get(&url).call()?.into_string()?;
+
+                    (
+                        response,
+                        false,
+                        MediaType::JavaScript,
+                        ModuleType::JavaScript,
+                    )
+                } else {
+                    println!("👀 unknown scheme {:?}", module_specifier.scheme());
+                    bail!("Unknown scheme {:?}", module_specifier.scheme())
+                };
+
             let code = if should_transpile {
                 let parsed = deno_ast::parse_module(ParseParams {
                     specifier: module_specifier.clone(),
