@@ -29,12 +29,9 @@ use deno_core::RequestedModuleType;
 use deno_core::ResolutionKind;
 use deno_core::RuntimeOptions;
 
-deno_core::extension!(
-    my_extension,
-    ops = [my_op],
-    esm_entry_point = "ext:my_extension/my_extension.js",
-    esm = [dir "src", "my_extension.js"],
-);
+static RUNTIME_SNAPSHOT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/RUNJS_SNAPSHOT.bin"));
+
+deno_core::extension!(my_extension, ops = [my_op]);
 
 deno_core::extension!(
     my_extension_2,
@@ -70,10 +67,8 @@ fn main() -> Result<(), Error> {
         module_loader: Some(Rc::new(TypescriptModuleLoader {
             source_maps: source_map_store,
         })),
-        extensions: vec![
-            my_extension::init_ops_and_esm(),
-            my_extension_2::init_ops_and_esm(),
-        ],
+        startup_snapshot: Some(RUNTIME_SNAPSHOT),
+        extensions: vec![my_extension::init_ops(), my_extension_2::init_ops_and_esm()],
         ..Default::default()
     });
 
