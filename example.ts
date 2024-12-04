@@ -9,3 +9,6 @@ import * as cowsay from "https://esm.sh/cowsay@1.6.0";
 // console.log("Hello runjs! " + a);
 
 console.log(cowsay.say({ text: "Hello Mile!" }));
+
+console.log(MyExtension.myOp());
+console.log(MyExtension2.myOp2());

@@ -29,6 +29,73 @@ use deno_core::RequestedModuleType;
 use deno_core::ResolutionKind;
 use deno_core::RuntimeOptions;
 
+deno_core::extension!(
+    my_extension,
+    ops = [my_op],
+    esm_entry_point = "ext:my_extension/my_extension.js",
+    esm = [dir "src", "my_extension.js"],
+);
+
+deno_core::extension!(
+    my_extension_2,
+    ops = [my_op_2],
+    esm_entry_point = "ext:my_extension_2/my_extension_2.js",
+    esm = [dir "src", "my_extension_2.js"],
+);
+
+#[deno_core::op2]
+#[string]
+fn my_op() -> String {
+    "hello".to_string()
+}
+
+#[deno_core::op2]
+#[string]
+fn my_op_2() -> String {
+    "hi 2".to_string()
+}
+
+fn main() -> Result<(), Error> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        println!("Usage: target/examples/debug/ts_module_loader <path_to_module>");
+        std::process::exit(1);
+    }
+    let main_url = &args[1];
+    println!("Run {main_url}");
+
+    let source_map_store = Rc::new(RefCell::new(HashMap::new()));
+
+    let mut js_runtime = JsRuntime::new(RuntimeOptions {
+        module_loader: Some(Rc::new(TypescriptModuleLoader {
+            source_maps: source_map_store,
+        })),
+        extensions: vec![
+            my_extension::init_ops_and_esm(),
+            my_extension_2::init_ops_and_esm(),
+        ],
+        ..Default::default()
+    });
+
+    let main_module = resolve_path(
+        main_url,
+        &std::env::current_dir().context("Unable to get CWD")?,
+    )?;
+
+    let future = async move {
+        let mod_id = js_runtime.load_main_es_module(&main_module).await?;
+        let result = js_runtime.mod_evaluate(mod_id);
+        js_runtime.run_event_loop(Default::default()).await?;
+        result.await
+    };
+
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
+
 type SourceMapStore = Rc<RefCell<HashMap<String, Vec<u8>>>>;
 
 struct TypescriptModuleLoader {
@@ -148,41 +215,4 @@ impl ModuleLoader for TypescriptModuleLoader {
     fn get_source_map(&self, specifier: &str) -> Option<Vec<u8>> {
         self.source_maps.borrow().get(specifier).cloned()
     }
-}
-
-fn main() -> Result<(), Error> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        println!("Usage: target/examples/debug/ts_module_loader <path_to_module>");
-        std::process::exit(1);
-    }
-    let main_url = &args[1];
-    println!("Run {main_url}");
-
-    let source_map_store = Rc::new(RefCell::new(HashMap::new()));
-
-    let mut js_runtime = JsRuntime::new(RuntimeOptions {
-        module_loader: Some(Rc::new(TypescriptModuleLoader {
-            source_maps: source_map_store,
-        })),
-        ..Default::default()
-    });
-
-    let main_module = resolve_path(
-        main_url,
-        &std::env::current_dir().context("Unable to get CWD")?,
-    )?;
-
-    let future = async move {
-        let mod_id = js_runtime.load_main_es_module(&main_module).await?;
-        let result = js_runtime.mod_evaluate(mod_id);
-        js_runtime.run_event_loop(Default::default()).await?;
-        result.await
-    };
-
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(future)
 }
